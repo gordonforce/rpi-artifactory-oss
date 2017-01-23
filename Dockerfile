@@ -1,42 +1,36 @@
-FROM gordonff/rpi-tomcat:latest
+FROM cpollet/rpi-jre8
 
-MAINTAINER Gordon Force <gordonff@gmail.com>
+LABEL maintianer "gordonff@gmail.com"
 
 # To update, check https://bintray.com/jfrog/artifactory/artifactory/view
-ENV ARTIFACTORY_VERSION 4.14.3
-ENV ARTIFACTORY_SHA1 2DDB93230F997C028ED0A6E74ADB064E6A67613A
+ENV AF_VERSION=4.16.0 \
+		AF_SHA1=CFF2C0ECF8F535CD092CA51614FE7577C7213CBB \
+		AF_HOME=/artifactory
+ENV	AF_BASE=artifactory-oss-${AF_VERSION} 
+ENV	AF_DL_FILE=artifactory.zip \
+		AF_URL=https://bintray.com/artifact/download/jfrog/artifactory/jfrog-${AF_BASE}.zip
 
-# Disable Tomcat's manager application.
-RUN rm -rf webapps/*
+# Download and extract an artifactory version into the /artifactory directory
+# Alter the JVM configuration to use a heap maximum of 512m instead of 2g
+RUN apt-get update -yqq \
+	&& apt-get install -yqq curl unzip \
+	&& mkdir ${AF_HOME} \
+	&& cd ${AF_HOME} \
+  && echo ${AF_SHA1} artifactory.zip  > artifactory.zip.sha1 \
+  && curl -Lk -o ${AF_DL_FILE} ${AF_URL} \
+  && sha1sum -c artifactory.zip.sha1 \
+  && unzip -o ${AF_DL_FILE} \
+  && mv ${AF_BASE}/* . \
+  && rm -rf ${AF_DL_FILE} ${AF_BASE} \
+  && cd bin \
+  && sed -ri 's/2g/512m/g' artifactory.default
 
-# Redirect URL from / to artifactory/ using UrlRewriteFilter
-COPY urlrewrite/WEB-INF/lib/urlrewritefilter.jar /
-COPY urlrewrite/WEB-INF/urlrewrite.xml /
-RUN \
-  mkdir -p webapps/ROOT/WEB-INF/lib && \
-  mv /urlrewritefilter.jar webapps/ROOT/WEB-INF/lib && \
-  mv /urlrewrite.xml webapps/ROOT/WEB-INF/
+VOLUME ${AF_HOME}/data
+VOLUME ${AF_HOME}/logs
+VOLUME ${AF_HOME}/backup
 
-# Fetch and install Artifactory OSS war archive.
-RUN \
-  echo $ARTIFACTORY_SHA1 artifactory.zip > artifactory.zip.sha1 && \
-  curl -Lk -o artifactory.zip https://bintray.com/artifact/download/jfrog/artifactory/jfrog-artifactory-oss-${ARTIFACTORY_VERSION}.zip && \
-  sha1sum -c artifactory.zip.sha1 && \
-  /usr/bin/unzip -j artifactory.zip "artifactory-*/webapps/artifactory.war" -d webapps && \
-  rm artifactory.zip
+EXPOSE 8081
 
-# Expose tomcat runtime options through the RUNTIME_OPTS environment variable.
-#   Example to set the JVM's max heap size to 256MB use the flag
-#   '-e RUNTIME_OPTS="-Xmx256m"' when starting a container.
-RUN echo 'export CATALINA_OPTS="$RUNTIME_OPTS"' > bin/setenv.sh
+WORKDIR ${AF_HOME}
 
-# Artifactory home
-RUN mkdir -p /artifactory
-ENV ARTIFACTORY_HOME /artifactory
-
-# Expose Artifactories data, log and backup directory.
-VOLUME /artifactory/data
-VOLUME /artifactory/logs
-VOLUME /artifactory/backup
-
-WORKDIR /artifactory
+CMD bin/artifactory.sh
